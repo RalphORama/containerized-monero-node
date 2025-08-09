@@ -1,0 +1,29 @@
+# https://gitlab.torproject.org/tpo/core/tor/-/blob/HEAD/src/config/torrc.sample.in
+# https://2019.www.torproject.org/docs/tor-manual.html.en
+
+DataDirectory /var/lib/tor
+
+ExitPolicy reject6 *:*, reject *:*
+ExitRelay 0
+BridgeRelay 0
+IPv6Exit 0
+
+RunAsDaemon 0
+HardwareAccel 1
+
+Log notice stdout
+LogMessageDomains 1
+
+PublishServerDescriptor 0
+
+SOCKSPort 0.0.0.0:9050
+#ControlPort 0.0.0.0:9051
+# password: containerized-monero-node
+#HashedControlPassword 16:2113A9E541E11831604B2D3FFB2FD0B36A70F65C473BE2C08C3ECC497B
+
+# WARNING! The IPv4 address here is also specified in compose.yaml.
+# Be VERY careful changing it!
+HiddenServiceDir /var/lib/tor/monerod
+HiddenServicePort 18089 172.31.255.249:18089    # interface for wallet ("RPC")
+HiddenServicePort 18084 172.31.255.249:18084    # interface for P2P network
+

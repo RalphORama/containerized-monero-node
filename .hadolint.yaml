@@ -1,0 +1,7 @@
+failure-threshold: warning
+
+ignored:
+  - DL3008 # pin versions in apt-get install
+
+label-schema:
+  version: semver

@@ -1,0 +1,162 @@
+# compose.example.yaml
+#
+# Copy env.example to .env and edit .env to customize node settings, then
+# copy this file to compose.yaml and run the node with the command
+#   docker compose up --build --detach
+#
+# View logs with the follwoing commands:
+#   All logs: docker compose logs --follow
+#   Just monerod: docker compose logs --follow --no-log-prefix monerod
+#
+# NB: After your first run, make sure to back up the contents of the named
+#     volumes in this file, otherwise you may lose the private keys for your
+#     hidden services!
+
+
+x-log-config: &log-config
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "20"
+      compress: "true"
+
+volumes:
+  tor-monerod:
+  i2pd:
+
+networks:
+  tor_net:
+    ipam:
+      driver: default
+      config:
+        - subnet: "172.31.255.0/24"
+
+services:
+  tor:
+    container_name: monerod_tor
+
+    restart: unless-stopped
+
+    build:
+      context: ./dockerfiles/tor
+
+    volumes:
+      - "tor-monerod:/var/lib/tor/monerod"
+
+    # Uncomment to enable access to the Tor SOCKS proxy from the host machine.
+    #ports:
+    #  - "127.0.0.1:9050:9050" # Tor SOCKS proxy
+
+    networks:
+      tor_net:
+        ipv4_address: 172.31.255.250
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsSL -x socks5h://127.0.0.1:9050 'https://check.torproject.org/api/ip' | grep -qE 'IsTor.:true' || exit 1"]
+      interval: 300s
+      timeout: 15s
+      start_period: 120s
+      start_interval: 10s
+
+    <<: *log-config
+
+  i2pd:
+    container_name: monerod_i2pd
+
+    restart: unless-stopped
+
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    ## Cleaner (but longer) exit option.
+    ## i2pd stops accepting new tunnels and waits ~10 min while old ones do not die.
+    ## Taken from the SystemD unit from PurpleI2P:
+    ##   https://github.com/PurpleI2P/i2pd/blob/openssl/contrib/i2pd.service#L27-L30
+    #stop_signal: SIGINT
+    #stop_grace_period: 10m
+
+    build:
+      context: ./dockerfiles/i2pd
+
+    volumes:
+      - "i2pd:/var/lib/i2pd"
+
+    ports:
+      # Publish a port for I2P to listen for incoming connections
+      - "0.0.0.0:${I2P_LISTEN_PORT:-58618}:58618"
+      - "0.0.0.0:${I2P_LISTEN_PORT:-58618}:58618/udp"
+      # Uncomment the following if you want to access I2PD from the host machine
+      #- 127.0.0.1:4447:4447 # i2p SOCKS proxy
+      #- 127.0.0.1:7070:7070 # i2pd web console
+
+    # HACK: Probably not the best way to run the HEALTHCHECK for i2pd but I'm
+    # unsure of a better method. Seems like checking for established tunnels
+    # should be a good enough indicator of a healthy service.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs 'http://127.0.0.1:7070/?page=tunnels' | grep -qE '[0-9]+ms.+established.+[0-9]+.[0-9]+ [KM]iB' || exit 1"]
+      interval: 300s
+      timeout: 15s
+      start_period: 300s  # extra long start period for first run
+      start_interval: 10s
+
+    networks:
+      tor_net:
+        ipv4_address: 172.31.255.251
+
+    <<: *log-config
+
+  monerod:
+    container_name: monerod
+
+    restart: unless-stopped
+
+    # monerod takes a *long* time to exit on slower drives
+    stop_grace_period: 120s
+
+    build:
+      context: ./dockerfiles/monerod
+      args:
+        MAKE_THREADS: "${MAKE_THREADS:-2}"
+        MONERO_RELEASE: "${MONEROD_VERSION:-v0.18.4.1}"
+
+    mem_limit: "${MONEROD_MEMORY_LIMIT:-4gb}"
+    mem_reservation: "${MONEROD_MEMORY_LIMIT:-4gb}"
+
+    deploy:
+      resources:
+        limits:
+          memory: "${MONEROD_MEMORY_LIMIT:-4gb}"
+        reservations:
+          memory: "${MONEROD_MEMORY_LIMIT:-4gb}"
+
+    depends_on:
+      tor:
+        condition: service_healthy
+        required: "${MONEROD_USE_TOR:-true}"
+      i2pd:
+        condition: service_healthy
+        required: "${MONEROD_USE_I2P:-true}"
+
+    # Copy env.example -> .env and edit it to customize settings
+    env_file:
+      - ./.env
+
+    volumes:
+      # Change /monero/lmdb to /monero if you want to specify a custom
+      # bitmonero.conf in the mount folder.
+      - "${BLOCKCHAIN_DIR:-./data/blockchain}:/monero/lmdb"
+      - "tor-monerod:/var/lib/tor/monerod:ro"
+
+    ports:
+      - "${P2P_PORT:-18080}:18080"                        # P2P Network
+      # If you only want to run your node over hidden services, comment this line
+      # and uncomment the line below
+      - "${RESTRICTED_RPC_PORT:-18089}:18089"             # Restricted JSON-RPC
+      #- "127.0.0.1:${RESTRICTED_RPC_PORT:-18089}:18089"   # Restricted JSON-RPC
+      #- "127.0.0.1:${UNRESTRICTED_RPC_PORT:-18083}:18083" # Unrestricted JSON-RPC
+
+    networks:
+      tor_net:
+        ipv4_address: 172.31.255.249
+
+    <<: *log-config

@@ -1,0 +1,6 @@
+.editorconfig
+.env
+.git/
+.gitignore
+data/
+env.example
