@@ -2,5 +2,6 @@
 .env
 .git/
 .gitignore
+backups/
 data/
 env.example

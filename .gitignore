@@ -1,3 +1,6 @@
-/data
+backups/
+!backups/.gitkeep
+data/
+!data/.gitkeep
 .env*
 compose.yaml
