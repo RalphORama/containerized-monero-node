@@ -4,7 +4,7 @@
 # Run on the host machine with this command:
 #   docker compose exec -ti monerod /test_hidden_services.sh
 
-set -e
+set -euo pipefail
 
 get_node_height () {
   curl -fsS -o- -x "$1" "$2/get_info" | grep -oE '"height": [[:digit:]]+' | grep -oE '[[:digit:]]+'

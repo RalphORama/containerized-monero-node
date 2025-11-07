@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -ex
+set -euo pipefail
 
 log_msg () {
   local caller="$1"
