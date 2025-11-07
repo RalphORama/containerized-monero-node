@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 
-set -e
-set -o pipefail
+set -euo pipefail
+
+# https://stackoverflow.com/a/12694189/3722806
+SCRIPT_DIR="${BASH_SOURCE%/*}"
+if [ ! -d "$SCRIPT_DIR" ]; then SCRIPT_DIR="$PWD"; fi
+
+source "${SCRIPT_DIR}/lib/logging.sh"
+
+unset SCRIPT_DIR
 
 LOG_LEVEL="${LOG_LEVEL:-INFO}"
 VERBOSE=""
@@ -26,25 +33,25 @@ case "$LOG_LEVEL" in
     COMPOSE_OPTS+=("--progress=quiet")
     ;;
   *)
-    echo -e "ERROR\tExpected LOG_LEVEL to be one of (DEBUG|INFO|WARN|ERROR) but got ${LOG_LEVEL}" >&2
+    log_msg 'ERROR' "Expected LOG_LEVEL to be one of (DEBUG|INFO|WARN|ERROR) but got ${LOG_LEVEL}" 'main'
     ;;
 esac
 
-echo -e "INFO\tLOG_LEVEL set to $LOG_LEVEL"
+log_msg 'DEBUG' "LOG_LEVEL set to $LOG_LEVEL" 'main'
 
 if [ ! -f "./compose.yaml" ]; then
-  echo -e "ERROR\tThere is no compose.yaml file in $(pwd). Are you in the right place?" >&2
+  log_msg 'ERROR' "There is no compose.yaml file in $(pwd). Are you in the right place?" 'main'
   exit 1
 fi
 
 if [ -z "$BACKUPS_DIR" ]; then
-  echo -e "WARN\tBACKUPS_DIR not set in the environment or passed as first argument." >&2
-  echo -e "WARN\tSetting BACKUPS_DIR to $(pwd)/backups" >&2
+  log_msg 'WARN' "BACKUPS_DIR not set in the environment or passed as first argument." 'main'
+  log_msg 'WARN' "Setting BACKUPS_DIR to $(pwd)/backups" 'main'
   BACKUPS_DIR="./backups"
 fi
 
 if [ ! -d "$BACKUPS_DIR" ]; then
-  echo -e "ERROR\tThe directory $BACKUPS_DIR doesn't exist!" >&2
+  log_msg 'ERROR' "The directory $BACKUPS_DIR doesn't exist!" 'main'
   exit 1
 fi
 
@@ -52,20 +59,22 @@ clean_dir () {
   local target_dir="$1"
 
   if [ -z "$target_dir" ] || [ ! -d "$target_dir" ]; then
-    echo -e "ERROR\tCannot delete contents of ${target_dir} because it doesn't exist!" >&2
+    log_msg 'ERROR' "Cannot delete contents of ${target_dir} because it doesn't exist!" 'clean_dir'
     return 1
   fi
 
   # https://unix.stackexchange.com/a/86950/172280
   find "$target_dir" -mindepth 1 -maxdepth 1 -print0 | xargs -0 rm -rf $VERBOSE
 
-  echo -e "DEBUG\tDeleted contents of ${target_dir}."
+  log_msg 'DEBUG' "Deleted contents of ${target_dir}" 'clean_dir'
 
   return 0
 }
 
 service_is_running () {
   local service="$1"
+
+  log_msg 'DEBUG' "Checking if ${service} is running..." 'service_is_running'
 
   docker compose ${COMPOSE_OPTS[@]} ps \
     --services \
@@ -82,12 +91,12 @@ check_container_files () {
   declare -a files=("${@:2}")
 
   if [ -z "$service" ]; then
-    echo -e "ERROR\tNo arguments passed!" >&2
+    log_msg 'ERROR' "No arguments passed!" 'check_container_files'
     return 1
   fi
 
   if [ "$(service_is_running $service)" = "false" ]; then
-    echo -e "ERROR\tThe service ${service} is not running!"
+    log_msg 'ERROR' "The service ${service} is not running!" 'check_container_files'
     return 1
   fi
 
@@ -95,7 +104,7 @@ check_container_files () {
     if ! docker compose ${COMPOSE_OPTS[@]} exec -ti "$service" \
       /usr/bin/env bash -c "test -f $file || test -d $file || exit 1"; \
     then
-      echo -e "ERROR\t$file does not exist inside ${service}!" >&2
+      log_msg 'ERROR' "${file} does not exist inside ${service}!" 'check_container_files'
       return 1
     fi
   done
@@ -111,7 +120,7 @@ backup_service () {
   local service_exists="$(docker compose ${COMPOSE_OPTS[@]} config --services | grep -o $service || true)"
 
   if [ -z "$service" ] || [ -z "$service_exists" ]; then
-    echo -e "ERROR\t$service is not in the list of Docker Compose services!" >&2
+    log_msg "Service $service is not in the list of Docker Compose services!"
     return 1
   fi
 
@@ -120,7 +129,7 @@ backup_service () {
   local tarball="${service}_${TIMESTAMP}.tar.gz"
 
   if [ ! -d "$output_dir" ]; then
-    echo -e "INFO\tCreating $output_dir"
+    log_msg 'INFO' "Creating $output_dir"
     mkdir -p $VERBOSE "$output_dir"
   fi
 
@@ -131,12 +140,9 @@ backup_service () {
     clean_dir "$tmp_dir"
   fi
 
-  #echo -e "INFO\tChecking files exist in ${service}..."
-  #check_container_files "$service" "${files[@]}"
-
-  echo -e "INFO\tBacking up files from ${service}..."
+  log_msg 'INFO' "Backing up files from ${service}..."
   for file in "${files[@]}"; do
-    echo -e "DEBUG\tCopying ${service}:${file} -> ${tmp_dir}"
+    log_msg 'DEBUG' "Copying ${service}:${file} -> ${tmp_dir}"
 
     docker compose ${COMPOSE_OPTS[@]} cp \
       --archive \
@@ -154,7 +160,7 @@ backup_service () {
 
   clean_dir "$tmp_dir"
 
-  echo -e "INFO\tBackup for ${service} created at ${output_dir}/${tarball}!"
+  log_msg 'INFO' "Backup for ${service} created at ${output_dir}/${tarball}!"
 
   return 0
 }
@@ -163,32 +169,33 @@ backup_service () {
 declare -a tor_files=("/var/lib/tor/monerod")
 declare -a i2pd_files=("/var/lib/i2pd/monero-mainnet.dat")
 
-echo -e "INFO\tChecking files exist in their containers..."
+log_msg 'INFO' "Checking files exist in their containers..." 'main'
 check_container_files 'tor' "${tor_files[@]}"
 check_container_files 'i2pd' "${i2pd_files[@]}"
 
 if [ "$PAUSE_CONTAINERS" = "true" ]; then
-  echo -e "INFO\tPausing services while we back up files..."
+  log_msg 'INFO' "Pausing services while we back up files..." 'main'
   docker compose ${COMPOSE_OPTS[@]} pause
 else
-  echo -e "WARN\tNot pausing containers during backup. This might cause issues!"
+  log_msg 'WARN' "Not pausing containers during backup. This might cause issues!" 'main'
 fi
 
-echo -e "INFO\tBacking up files for tor..."
+log_msg 'WARN' "FIXME Running hardcoded Tor backup..." 'main'
 backup_service 'tor' "${tor_files[@]}"
 
-echo -e "INFO\tBacking up files for i2pd..."
+log_msg 'WARN' "FIXME Running hardcoded I2PD backup..." 'main'
 backup_service 'i2pd' "${i2pd_files[@]}"
 
 if [ "$PAUSE_CONTAINERS" = "true" ]; then
-  echo -e "INFO\tWaiting 5 seconds before unpausing services..."
-  sleep 5
+  declare -i SLEEP_TIME=5
+  log_msg 'INFO' "Waiting ${SLEEP_TIME} seconds before unpausing services..." 'main'
+  sleep $SLEEP_TIME
 
-  echo -e "INFO\tUnpausing services now that backups are done..."
+  log_msg 'INFO' "Unpausing services now that backups are done..." 'main'
   docker compose ${COMPOSE_OPTS[@]} unpause
 
-  echo -e "WARN\tTor and I2P services may show as 'unhealthy' for the next ~5 minutes." >&2
-  echo -e "WARN\tThis is a normal result of pausing/unpausing the services to create a backup." >&2
+  log_msg 'WARN' "Tor and I2P services may show as 'unhealthy' for the next ~5 minutes." 'main'
+  log_msg 'WARN' "This is a normal result of pausing/unpausing the services to create a backup." 'main'
 fi
 
-echo -e "INFO\tFinished backing up files!"
+log_msg 'INFO' "Finished backing up files!"
