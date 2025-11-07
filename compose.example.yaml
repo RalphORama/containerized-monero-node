@@ -117,7 +117,7 @@ services:
       context: ./dockerfiles/monerod
       args:
         MAKE_THREADS: "${MAKE_THREADS:-2}"
-        MONERO_RELEASE: "${MONEROD_VERSION:-v0.18.4.1}"
+        MONERO_RELEASE: "${MONEROD_VERSION:-v0.18.4.3}"
 
     mem_limit: "${MONEROD_MEMORY_LIMIT:-4gb}"
     mem_reservation: "${MONEROD_MEMORY_LIMIT:-4gb}"
